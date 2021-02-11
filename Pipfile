@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+luma-oled = "*"
+#luma-lcd = "*"
+#luma-led_matrix = "*"
+#luma-emulator = "*"
+luma-core = ">=1.17.1"
+feedparser = "*"
+pillow = "*"
+rpi_ws281x = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.7"
