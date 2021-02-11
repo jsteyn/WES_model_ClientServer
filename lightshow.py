@@ -103,29 +103,29 @@ def main():
         try:
             while True:
                 client.sendall(b"\n> ")
-                data = client.recv(size).rstrip()
+                data = client.recv(size).rstrip().decode("utf-8")
                 if not data:
                     continue
-                client.sendall(b"Recieved command: " + data + b"\n")
-                if data == b"disconnect":
+                client.sendall(bytes("Recieved command: " + data + "\n", "utf-8"))
+                if data == "disconnect":
                     client.sendall(b"Client disconnected\n")
                     client.send(data)
                     client.close()
                     break
-                if data == b"exit":
+                if data == "exit":
                     client.sendall(b"Client asked server to quit\n")
                     client.send(data)
                     client.close()
                     clear_strip(strip, colors)
                     return
-                if data == b"help":
+                if data == "help":
                     client.sendall(b"disconnect\n")
                     client.sendall(b"exit\n")
                     client.sendall(b"clear\n")
                     client.sendall(b"set index r g b\n")
                     client.sendall(b"setall r g b\n")
                     continue
-                if data == b"clear":
+                if data == "clear":
                     client.sendall(b"Clearing strip")
                     clear_strip(strip, colors)
                     continue
@@ -133,27 +133,27 @@ def main():
                 try:
                     data_tokens = data.split(b" ")
                     # set <light index> <r> <g> <b>
-                    if data_tokens[0] == b"set":
-                        led_index = get_led(data_tokens[1].decode("utf-8"))
+                    if data_tokens[0] == "set":
+                        led_index = get_led(data_tokens[1])
                         r = int(data_tokens[2])
                         g = int(data_tokens[3])
                         b = int(data_tokens[4])
                         set_pixel(strip, colors, led_index, Color(r, g, b))
                         continue
                     # setall <r> <g> <b>
-                    if data_tokens[0] == b"setall":
+                    if data_tokens[0] == "setall":
                         r = int(data_tokens[1])
                         g = int(data_tokens[2])
                         b = int(data_tokens[3])
                         set_all_pixels(strip, colors, Color(r, g, b))
                         continue
                     # assign <light index> <alias>
-                    if data_tokens[0] == b"assign":
-                        led_index = get_led(data_tokens[1].decode("utf-8"))
-                        alias = data_tokens[2].decode("utf-8")
+                    if data_tokens[0] == "assign":
+                        led_index = get_led(data_tokens[1])
+                        alias = data_tokens[2]
                         set_alias(led_index, alias)
                         continue
-                    cmd_fail_message = "Command " + str(data_tokens[0]) + " not recognised."
+                    cmd_fail_message = "Command " + data_tokens[0] + " not recognised."
                     raise InputError()
                 except InputError as err:
                     client.sendall(b"Error occured parsing input:\n")
