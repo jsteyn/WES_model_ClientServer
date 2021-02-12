@@ -33,6 +33,168 @@ class InputError(Exception):
         super().__init__("Input Exception")
 
 
+class ClientThread(threading.Thread):
+    def __init__(self, client):
+        super().__init__()
+        global thread_id_counter
+        self.client = client
+        self.client.settimeout(thread_timeout)
+        self.running = True
+        thread_id_counter += 1
+        self.id = thread_id_counter
+
+    def run(self):
+        self.mainloop()
+        try:
+            self.client.close()
+        except Exception:
+            pass
+
+
+    def mainloop(self):
+        self.client.sendall(b"Client connected\n")
+        new_command = True
+        while self.running:
+            try:
+                if new_command:
+                    self.client.sendall(b"> ")
+                    new_command = False
+                try:
+                    data = self.client.recv(size).rstrip().decode("utf-8")
+                    new_command = True
+                    if not data or not self.running:
+                        return
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                if data == "disconnect":
+                    self.client.sendall(b"Client disconnected\n")
+                    return
+                if data == "exit":
+                    self.client.sendall(b"Client called exit protocol\n")
+                    shutdown()
+                    return
+                if data == "help":
+                    self.client.sendall(b"-System Commands-\n")
+                    self.client.sendall(b" disconnect\n")
+                    self.client.sendall(b" exit\n")
+                    self.client.sendall(b" help\n")
+                    self.client.sendall(b"-Strip Commands-\n")
+                    self.client.sendall(b" clear-pixels\n")
+                    self.client.sendall(b" set <pixel> <r> <g> <b>\n")
+                    self.client.sendall(b" setall <r> <g> <b>\n")
+                    self.client.sendall(b" assign-alias <pixel> <alias>\n")
+                    self.client.sendall(b" store-aliases <name>\n")
+                    self.client.sendall(b" load-aliases <name>\n")
+                    self.client.sendall(b" list-alias-stores\n")
+                    self.client.sendall(b" list-aliases\n")
+                    self.client.sendall(b" clear-aliases\n")
+                    self.client.sendall(b"-Display Commands-\n")
+                    self.client.sendall(b" say <message>\n")
+                    self.client.sendall(b" message-speed <speed>\n")
+                    self.client.sendall(b" font-size <size>\n")
+                    continue
+                if data == "clear-pixels":
+                    self.client.sendall(b"Clearing strip\n")
+                    clear_strip()
+                    continue
+                if data == "list-alias-stores":
+                    list_alias_stores(self.client)
+                    continue
+                if data == "list-aliases":
+                    list_aliases(self.client)
+                    continue
+                if data == "clear-aliases":
+                    clear_aliases()
+                    continue
+
+                try:
+                    data_tokens = data.split(" ")
+                    # set <light index> <r> <g> <b>
+                    if data_tokens[0] == "set":
+                        led_index = get_led(data_tokens[1])
+                        r = int(data_tokens[2])
+                        g = int(data_tokens[3])
+                        b = int(data_tokens[4])
+                        set_pixel(led_index, Color(r, g, b))
+                        self.client.sendall(bytes("Set pixel " + data_tokens[1] + " to #" +
+                            format(r, "x") + format(g, "x") + format(b, "x") + "\n", "utf-8"))
+                        continue
+                    # setall <r> <g> <b>
+                    if data_tokens[0] == "setall":
+                        r = int(data_tokens[1])
+                        g = int(data_tokens[2])
+                        b = int(data_tokens[3])
+                        set_all_pixels(Color(r, g, b))
+                        self.client.sendall(bytes("Set all pixels to #" +
+                            format(r, "x") + format(g, "x") + format(b, "x") + "\n", "utf-8"))
+                        continue
+                    # assign-alias <light index> <alias>
+                    if data_tokens[0] == "assign-alias":
+                        led_index = get_led(data_tokens[1])
+                        alias = data_tokens[2]
+                        set_alias(led_index, alias)
+                        self.client.sendall(bytes("Added alias " + alias + " to pixel " +
+                            str(led_index) + "\n", "utf-8"))
+                        continue
+                    # store-aliases <name>
+                    if data_tokens[0] == "store-aliases":
+                        name = data_tokens[1]
+                        save_aliases(name, client)
+                        self.client.sendall(bytes("Saved aliases to name " + name + "\n", "utf-8"))
+                        continue
+                    # load-aliases <name>
+                    if data_tokens[0] == "load-aliases":
+                        name = data_tokens[1]
+                        load_aliases(name)
+                        self.client.sendall(bytes("Loaded aliases from " + name + "\n", "utf-8"))
+                        continue
+
+                    # say <message>
+                    if data_tokens[0] == "say":
+                        message = " ".join(data_tokens[1:])
+                        queue.put(message)
+                        self.client.sendall(bytes("Added message '" + message + "' to queue\n", "utf-8"))
+                        continue
+                    # message-speed <speed>
+                    if data_tokens[0] == "message-speed":
+                        global message_speed
+                        message_speed = int(data_tokens[1])
+                        self.client.sendall(bytes("Set message speed to " + data_tokens[1] + "\n", "utf-8"))
+                        continue
+                    # font-size <size>
+                    if data_tokens[0] == "font-size":
+                        global font, font_changed
+                        fsize = int(data_tokens[1])
+                        font = make_font(u"code2000.ttf", fsize)
+                        font_changed = True
+                        self.client.sendall(bytes("Set font size to " + data_tokens[1] + "\n", "utf-8"))
+                        continue
+                    cmd_fail_message = "Command " + data_tokens[0] + " not recognised."
+                    raise InputError()
+                except InputError as err:
+                    self.client.sendall(b"Error occured parsing input:\n")
+                    if cmd_fail_message is None:
+                        self.client.sendall(b"-- Unknown Error.\n")
+                    else:
+                        self.client.sendall(bytes("-- " + cmd_fail_message + "\n", "utf-8"))
+                        cmd_fail_message = None
+            except Exception as err:
+                try:
+                    self.client.sendall(b"Server Error\n")
+                except Exception:
+                    pass
+                traceback.print_exc()
+
+    def stop(self):
+        self.running = False
+        try:
+            self.client.close()
+        except Exception:
+            pass
+
+
 class ScrollThread(threading.Thread):
     def __init__(self):
         super().__init__()
@@ -148,11 +310,12 @@ def set_alias(value: int, alias: str):
     """
     aliases[alias] = value
 
-def save_aliases(name: str):
+def save_aliases(name: str, client):
     """Save aliases to new store, or overwrite existing store"""
     filepath = "alias_store/" + name + ".json"
     if os.path.isfile(filepath):
-        client.sendall(b"Alias store of name " + bytes(name, "utf-8") + b" already exists.\nOverwrite existing store? (yes/no)")
+        client.sendall(b"Alias store of name " + bytes(name, "utf-8") +
+                b" already exists.\nOverwrite existing store? (yes/no)")
         if client.recv(size).rstrip() != b"yes":
             client.sendall(b"Aborting save\n")
             return
@@ -173,7 +336,7 @@ def clear_aliases():
     aliases = {}
 
 
-def list_aliases():
+def list_aliases(client):
     """Print list of the currently assigned aliases"""
     inverse_aliases = { i: [str(i)] for i in range(strip.numPixels()) }
     for alias, index in aliases.items():
@@ -183,7 +346,7 @@ def list_aliases():
         client.sendall(bytes(str(index), "utf-8") + b" -> " + bytes(", ".join(alias_list), "utf-8") + b"\n")
 
 
-def list_alias_stores():
+def list_alias_stores(client):
     """Print list of all available alias stores"""
     files = [f for f in os.listdir("./alias_store/") if f.endswith(".json")]
     if len(files) == 0:
@@ -204,23 +367,32 @@ def get_led(alias: str) -> int:
             if int(alias) < strip.numPixels():
                 return int(alias)
             else:
-                cmd_fail_message = "Pixel of index <" + alias + "> is out of bounds.\n Strip only has up to index <" + str(strip.numPixels() - 1) + ">."
+                cmd_fail_message = ("Pixel of index <" + alias +
+                        "> is out of bounds.\n Strip only has up to index <" +
+                        str(strip.numPixels() - 1) + ">.")
         except ValueError:
             cmd_fail_message = "Pixel index alias <" + alias + "> not recognized."
         raise InputError()
 
 
 def main():
-    global client, strip, cmd_fail_message, colors, scroll_thread
+    global sock, strip, cmd_fail_message, colors, scroll_thread, client_threads
     print("Setting up...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((host, port))
     sock.listen(backlog)
+    sock.settimeout(thread_timeout)
+
+    print("-- Connections")
+    print("   Port: " + str(port))
 
     print("Initialising threads...")
     scroll_thread = ScrollThread()
     scroll_thread.start()
+
+    print("-- Threads")
+    print("   Listener Timeout: " + str(thread_timeout) + "s")
 
     print("Initialising strip...")
     strip = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS)
@@ -228,133 +400,26 @@ def main():
     strip.begin()
     update_strip()
 
-    print("Waiting for connections")
+    print("-- LED Strip")
+    print("   LEDs: " + str(strip.numPixels()))
+
+    print("USE TELNET TO TYPE COMMANDS. NOT THIS TERMINAL.")
+    print("Waiting for connections...")
     try:
-        while True:
-            client, address = sock.accept()
-            client.sendall(b"Client connected\n")
-            print("Client connected")
+        client_threads = []
+        while do_run:
             try:
-                while True:
-                    client.sendall(b"> ")
-                    data = client.recv(size).rstrip().decode("utf-8")
-                    if not data:
-                        continue
-                    if data == "disconnect":
-                        client.sendall(b"Client disconnected\n")
-                        client.close()
-                        break
-                    if data == "exit":
-                        client.sendall(b"Client called exit protocol\n")
-                        client.close()
-                        clear_strip()
-                        return
-                    if data == "help":
-                        client.sendall(b"-System Commands-\n")
-                        client.sendall(b"disconnect\n")
-                        client.sendall(b"exit\n")
-                        client.sendall(b"help\n")
-                        client.sendall(b"-Strip Commands-\n")
-                        client.sendall(b"clear-pixels\n")
-                        client.sendall(b"set <pixel> <r> <g> <b>\n")
-                        client.sendall(b"setall <r> <g> <b>\n")
-                        client.sendall(b"assign-alias <pixel> <alias>\n")
-                        client.sendall(b"store-aliases <name>\n")
-                        client.sendall(b"load-aliases <name>\n")
-                        client.sendall(b"list-alias-stores\n")
-                        client.sendall(b"list-aliases\n")
-                        client.sendall(b"clear-aliases\n")
-                        client.sendall(b"-Display Commands-\n")
-                        client.sendall(b"say <message>\n")
-                        client.sendall(b"message-speed <speed>\n")
-                        client.sendall(b"font-size <size>\n")
-                        continue
-                    if data == "clear-pixels":
-                        client.sendall(b"Clearing strip\n")
-                        clear_strip()
-                        continue
-                    if data == "list-alias-stores":
-                        list_alias_stores()
-                        continue
-                    if data == "list-aliases":
-                        list_aliases()
-                        continue
-                    if data == "clear-aliases":
-                        clear_aliases()
-                        continue
-
-                    try:
-                        data_tokens = data.split(" ")
-                        # set <light index> <r> <g> <b>
-                        if data_tokens[0] == "set":
-                            led_index = get_led(data_tokens[1])
-                            r = int(data_tokens[2])
-                            g = int(data_tokens[3])
-                            b = int(data_tokens[4])
-                            set_pixel(led_index, Color(r, g, b))
-                            client.sendall(bytes("Set pixel " + data_tokens[1] + " to #" + format(r, "x") + format(g, "x") + format(b, "x") + "\n", "utf-8"))
-                            continue
-                        # setall <r> <g> <b>
-                        if data_tokens[0] == "setall":
-                            r = int(data_tokens[1])
-                            g = int(data_tokens[2])
-                            b = int(data_tokens[3])
-                            set_all_pixels(Color(r, g, b))
-                            client.sendall(bytes("Set all pixels to #" + format(r, "x") + format(g, "x") + format(b, "x") + "\n", "utf-8"))
-                            continue
-                        # assign-alias <light index> <alias>
-                        if data_tokens[0] == "assign-alias":
-                            led_index = get_led(data_tokens[1])
-                            alias = data_tokens[2]
-                            set_alias(led_index, alias)
-                            client.sendall(bytes("Added alias " + alias + " to pixel " + str(led_index) + "\n", "utf-8"))
-                            continue
-                        # store-aliases <name>
-                        if data_tokens[0] == "store-aliases":
-                            name = data_tokens[1]
-                            save_aliases(name)
-                            client.sendall(bytes("Saved aliases to name " + name + "\n", "utf-8"))
-                            continue
-                        # load-aliases <name>
-                        if data_tokens[0] == "load-aliases":
-                            name = data_tokens[1]
-                            load_aliases(name)
-                            client.sendall(bytes("Loaded aliases from " + name + "\n", "utf-8"))
-                            continue
-
-                        # say <message>
-                        if data_tokens[0] == "say":
-                            message = " ".join(data_tokens[1:])
-                            queue.put(message)
-                            client.sendall(bytes("Added message '" + message + "' to queue\n", "utf-8"))
-                            continue
-                        # message-speed <speed>
-                        if data_tokens[0] == "message-speed":
-                            global message_speed
-                            message_speed = int(data_tokens[1])
-                            client.sendall(bytes("Set message speed to " + data_tokens[1] + "\n", "utf-8"))
-                            continue
-                        # font-size <size>
-                        if data_tokens[0] == "font-size":
-                            global font, font_changed
-                            fsize = int(data_tokens[1])
-                            font = make_font(u"code2000.ttf", fsize)
-                            font_changed = True
-                            client.sendall(bytes("Set font size to " + data_tokens[1] + "\n", "utf-8"))
-                            continue
-                        cmd_fail_message = "Command " + data_tokens[0] + " not recognised."
-                        raise InputError()
-                    except InputError as err:
-                        client.sendall(b"Error occured parsing input:\n")
-                        if cmd_fail_message is None:
-                            client.sendall(b"-- Unknown Error.\n")
-                        else:
-                            client.sendall(bytes("-- " + cmd_fail_message + "\n", "utf-8"))
-                            cmd_fail_message = None
-            except Exception as err:
-                client.sendall(b"Error occured, Server shutting down...\n")
-                traceback.print_exc()
-                return
+                client, address = sock.accept()
+                print("Client connected from " + str(address) + " with thread id <" + str(thread_id_counter + 1) + ">")
+                new_thread = ClientThread(client)
+                new_thread.start()
+                client_threads.append(new_thread)
+            except socket.timeout:
+                pass
+            except OSError:
+                break
+    except Exception:
+        traceback.print_exc()
     finally:
         global do_thread
         print("Closing server")
@@ -362,9 +427,19 @@ def main():
         with queue.mutex:
             queue.queue.clear()
         queue.put(None)
+        print("Joining Threads")
+        for t in client_threads:
+            t.stop()
+        for t in client_threads:
+            t.join()
         clear_strip()
         sock.close()
 
+
+def shutdown():
+    global do_run
+    do_run = False
+    sock.close()
 
 
 # CONSTANTS
@@ -380,11 +455,16 @@ cmd_fail_message = None
 aliases = {}
 strip = None
 colors = None
+thread_timeout = 2
+thread_id_counter = 0
 
+do_run = True
 font_changed = False
 do_thread = True
+scroll_thread = None
+client_threads = None
 
-client = None
+sock = None
 host = ""
 port = 8001
 backlog = 5

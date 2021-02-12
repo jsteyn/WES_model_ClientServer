@@ -59,7 +59,7 @@ def get_device(actual_args=None):
     # create device
     try:
         device = cmdline.create_device(args)
-        print(display_settings(device, args))
+        #print(display_settings(device, args))
         return device
 
     except error.Error as e:
